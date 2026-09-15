@@ -25,6 +25,7 @@ import { requireSupportWrite } from "@/lib/impersonate/support";
  */
 import { randomUUID } from "node:crypto";
 import type { NextRequest } from "next/server";
+import { z } from "zod";
 
 import { fail, ok } from "@/lib/api/wrappers";
 import { requireRole } from "@/lib/auth/require-role";
@@ -59,6 +60,7 @@ export async function POST(req: NextRequest): Promise<Response> {
   if (supportDenied) return supportDenied;
 
   const requestId = randomUUID();
+  if (!z.string().uuid().safeParse(req.headers.get("Idempotency-Key")).success) return fail("invalid_request", "Idempotency-Key deve ser UUID.", 422, { requestId });
 
   const authz = await requireRole("agent", { requestId, resource: "channel_templates" });
   if (!authz.ok) return authz.response;

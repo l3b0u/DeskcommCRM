@@ -530,6 +530,9 @@ export const AUDIT_ACTIONS = [
   "crm_task.created",
   "crm_task.updated",
   "crm_task.deleted",
+  "channel.comment_replied",
+  "channel.comment_private_replied",
+  "channel.review_replied",
   "organization.switched",
 
   // Chamada de voz WhatsApp (spec 18, migration 0234). Ligá-la vincula um

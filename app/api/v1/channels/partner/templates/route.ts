@@ -26,6 +26,7 @@ import { requireSupportWrite } from "@/lib/impersonate/support";
  */
 import { randomUUID } from "node:crypto";
 import type { NextRequest } from "next/server";
+import { z } from "zod";
 
 import { fail, ok } from "@/lib/api/wrappers";
 import { audit } from "@/lib/audit";
@@ -38,7 +39,7 @@ import {
   type ChannelProvider,
   type ChannelSessionRef,
 } from "@/lib/channels";
-import { findPartnerSession } from "@/lib/channels/connect";
+import { sessaoParceiraParaAcaoSocial } from "@/lib/channels/connect";
 import { traduzir } from "@/lib/i18n/dicionario";
 import type { Idioma } from "@/lib/i18n/idiomas";
 import { logger } from "@/lib/logger";
@@ -62,6 +63,7 @@ interface Contexto {
  */
 async function contexto(
   requestId: string,
+  sessionId: string | null,
 ): Promise<{ ok: true; ctx: Contexto } | { ok: false; res: Response }> {
   const user = await loadAuthUser();
   if (!user) return { ok: false, res: fail("unauthenticated", "Faça login.", 401, { requestId }) };
@@ -70,7 +72,8 @@ async function contexto(
   if (!org) return { ok: false, res: fail("forbidden", t("Sem organização ativa."), 403, { requestId }) };
 
   const admin = createAdminClient();
-  const sessao = await findPartnerSession(admin, org.orgId);
+  if (!sessionId) return { ok: false, res: fail("invalid_request", t("Selecione uma conexão."), 422, { requestId }) };
+  const sessao = await sessaoParceiraParaAcaoSocial(admin, org.orgId, sessionId);
   if (!sessao || sessao.archivedAt) {
     return {
       ok: false,
@@ -103,9 +106,9 @@ async function contexto(
 }
 
 /** Lista o que está ESPELHADO. Rápido, e é o que a tela mostra. */
-export async function GET(): Promise<Response> {
+export async function GET(req: NextRequest): Promise<Response> {
   const requestId = randomUUID();
-  const r = await contexto(requestId);
+  const r = await contexto(requestId, req.nextUrl.searchParams.get("channel_session_id"));
   if (!r.ok) return r.res;
 
   const admin = createAdminClient();
@@ -149,7 +152,16 @@ export async function POST(req: NextRequest): Promise<Response> {
   if (supportDenied) return supportDenied;
 
   const requestId = randomUUID();
-  const r = await contexto(requestId);
+  if (!z.string().uuid().safeParse(req.headers.get("Idempotency-Key")).success) return fail("invalid_request", "Idempotency-Key deve ser UUID.", 422, { requestId });
+  const corpo = (await req.json().catch(() => ({}))) as {
+    channel_session_id?: string;
+    acao?: string;
+    name?: string;
+    language?: string;
+    category?: string;
+    components?: unknown[];
+  };
+  const r = await contexto(requestId, corpo.channel_session_id ?? null);
   if (!r.ok) return r.res;
   const t = (texto: string) => traduzir(texto, r.ctx.idioma);
 
@@ -157,14 +169,6 @@ export async function POST(req: NextRequest): Promise<Response> {
   if (!adapter.templates) {
     return fail("not_implemented", t("Este canal não gerencia definições."), 501, { requestId });
   }
-
-  const corpo = (await req.json().catch(() => ({}))) as {
-    acao?: string;
-    name?: string;
-    language?: string;
-    category?: string;
-    components?: unknown[];
-  };
 
   try {
     if (corpo.acao === "criar") {

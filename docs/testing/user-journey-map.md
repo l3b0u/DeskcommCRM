@@ -2272,3 +2272,4 @@ healthcheck, levando junto o `psql` do baseline — o log do CLI é que diz
 `container is not ready: unhealthy`; e um Realtime unhealthy varrendo o WAL levou o
 Postgres a `57014 statement timeout` e o GoTrue a `504`. **O Realtime não foi
 exercitado nesta rodada.**
+| J20.19 | Eu conecto uma conta social do provedor parceiro e respondo no mesmo atendimento | A chave lista contas; a conexão mostra rede/capacidades; DM e comentário autenticados entram uma vez e acionam lead, automação e agente | **UNIT** — `zernio-platform-capabilities.test.ts`, `zernio-social-webhooks.test.ts`, `channel-ingest-zernio.test.ts`, `canal-parceiro-tela.test.tsx`; **DB** — `canal-identificador-unico-entre-ativos.test.ts` + RLS das identidades/recibos; **E2E visual pendente nesta entrega** |

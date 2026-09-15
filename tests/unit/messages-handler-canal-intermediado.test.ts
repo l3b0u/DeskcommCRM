@@ -194,6 +194,7 @@ interface Forma {
   provider?: string;
   /** Canal excluído pela tela (migration 0106) — comporta o ramo `channel_archived`. */
   archivedAt?: string | null;
+  semIdentidade?: boolean;
 }
 
 function conversaCompleta(forma: Forma = {}): Row {
@@ -206,7 +207,9 @@ function conversaCompleta(forma: Forma = {}): Row {
     is_group: false,
     group_chat_id: null,
     provider_conversation_id: forma.providerConversationId ?? null,
-    contacts: { phone_number: "+595991733685", wa_identity: null, wa_lid: "999888", is_blocked: false },
+    contacts: forma.semIdentidade
+      ? { phone_number: null, wa_identity: null, wa_lid: null, is_blocked: false }
+      : { phone_number: "+595991733685", wa_identity: null, wa_lid: "999888", is_blocked: false },
     channel_sessions: {
       provider,
       waha_session_name: provider === "waha" ? "default" : null,

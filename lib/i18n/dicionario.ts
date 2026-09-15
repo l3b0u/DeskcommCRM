@@ -8687,6 +8687,14 @@ export const DICIONARIO: Traducoes = {
   "Erro ao reativar tenant": { es: "Error al reactivar el tenant" },
   "Incidente resolvido com sucesso": { es: "Incidente resuelto con éxito" },
   "Erro ao resolver incidente": { es: "Error al resolver el incidente" },
+  "Contas encontradas.": { es: "Cuentas encontradas." },
+  "Não foi possível buscar as contas.": { es: "No fue posible buscar las cuentas." },
+  "Conecte as contas sociais alcançadas pela sua chave. Mensagens e interações suportadas entram e saem pelo mesmo atendimento.": { es: "Conecta las cuentas sociales accesibles con tu clave. Los mensajes y las interacciones compatibles entran y salen por la misma atención." },
+  "Escolha uma das contas alcançadas pela chave. Cada rede fica como uma conexão separada.": { es: "Elige una de las cuentas accesibles con tu clave. Cada red queda como una conexión separada." },
+  "Conta disponível": { es: "Cuenta disponible" },
+  "Selecione uma conta": { es: "Selecciona una cuenta" },
+  "Buscar contas": { es: "Buscar cuentas" },
+  "Contas conectadas": { es: "Cuentas conectadas" },
 };
 
 /**

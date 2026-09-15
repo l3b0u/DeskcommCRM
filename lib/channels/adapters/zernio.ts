@@ -80,6 +80,7 @@ function attachmentFields(env: OutboundEnvelope): Record<string, unknown> {
 
 export const zernioAdapter: ChannelAdapter = {
   provider: "zernio",
+  canAddressByThread: true,
 
   /**
    * Telefone em dígitos — é o `participantId` da API.
@@ -189,9 +190,13 @@ export const zernioAdapter: ChannelAdapter = {
       );
     }
 
-    const url =
-      `${creds.baseUrl}/v1/inbox/conversations/` +
-      `${encodeURIComponent(envelope.providerConversationId)}/messages`;
+    const commentThread = /^comment:([^:]+):([^:]+)$/.exec(envelope.providerConversationId);
+    if (commentThread && !envelope.replyToExternalId) {
+      throw new Error("zernio_comment_reply_target_required: selecione o comentário que será respondido.");
+    }
+    const url = commentThread
+      ? `${creds.baseUrl}/v1/inbox/comments/${encodeURIComponent(commentThread[1]!)}`
+      : `${creds.baseUrl}/v1/inbox/conversations/${encodeURIComponent(envelope.providerConversationId)}/messages`;
 
     const body: Record<string, unknown> = {
       accountId: creds.accountId,
@@ -201,6 +206,7 @@ export const zernioAdapter: ChannelAdapter = {
       // `wamid`. É o `external_id` da linha citada, nunca o `id` da nossa
       // tabela: o provider nunca viu o nosso. Só entra quando existe.
       ...(envelope.replyToExternalId ? { replyTo: envelope.replyToExternalId } : {}),
+      ...(commentThread ? { commentId: envelope.replyToExternalId } : {}),
     };
 
     await envelope.beforeSend?.();

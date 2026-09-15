@@ -44,6 +44,7 @@ interface Estado {
   status: string | null;
   has_api_key: boolean;
   webhook_url: string | null;
+  connections?: Array<{ channel_session_id: string; account_id: string; platform: string; display_name: string | null; status: string | null; has_api_key: boolean; webhook_url: string | null }>;
 }
 
 interface Conectado {
@@ -51,6 +52,13 @@ interface Conectado {
   webhook_secret: string;
   phone_number: string | null;
   quality_rating: string | null;
+}
+
+interface ContaDisponivel {
+  account_id: string;
+  platform: string;
+  display_name: string;
+  username: string | null;
 }
 
 /** Campo somente-leitura com botão de copiar — o que o operador cola do outro lado. */
@@ -85,12 +93,15 @@ export function CanalParceiroClient() {
   const [apiKey, setApiKey] = useState("");
   const [salvando, setSalvando] = useState(false);
   const [recemConectado, setRecemConectado] = useState<Conectado | null>(null);
+  const [contas, setContas] = useState<ContaDisponivel[]>([]);
 
   const carregar = async () => {
     try {
       const r = await apiClient.get<{ data: Estado }>("/api/v1/channels/partner");
       setEstado(r.data);
-      if (r.data.account_id) setAccountId(r.data.account_id);
+      // Com várias conexões, deixar a primeira pré-selecionada transforma o
+      // próximo clique em reconexão acidental. A seleção passa a ser explícita.
+      if (!r.data.connections?.length && r.data.account_id) setAccountId(r.data.account_id);
     } catch {
       // Falha de leitura não deve travar a tela: o formulário continua servindo.
       setEstado(null);
@@ -121,6 +132,16 @@ export function CanalParceiroClient() {
     }
   };
 
+  const buscarContas = async () => {
+    setSalvando(true);
+    try {
+      const r = await apiClient.post<{ data: { accounts: ContaDisponivel[] } }>("/api/v1/channels/partner", { api_key: apiKey });
+      setContas(r.data.accounts);
+      toast.success(t("Contas encontradas."));
+    } catch (e) { toast.error(e instanceof Error ? t(e.message) : t("Não foi possível buscar as contas.")); }
+    finally { setSalvando(false); }
+  };
+
   const rotulo = estado?.label ?? t("provedor parceiro");
   const conectado = estado?.connected ?? false;
 
@@ -134,7 +155,7 @@ export function CanalParceiroClient() {
             </h3>
             <p className="text-xs text-muted-foreground">
               {t(
-                "Um número oficial (WhatsApp Business) conectado através do seu provedor. As mensagens entram e saem pelo CRM, e os modelos aprovados são os mesmos da sua conta.",
+                "Conecte as contas sociais alcançadas pela sua chave. Mensagens e interações suportadas entram e saem pelo mesmo atendimento.",
               )}
             </p>
           </div>
@@ -166,8 +187,12 @@ export function CanalParceiroClient() {
               autoComplete="off"
             />
             <p className="text-xs text-muted-foreground">
-              {t("É o identificador do número no painel do provedor — não o da Meta.")}
+              {t("Escolha uma das contas alcançadas pela chave. Cada rede fica como uma conexão separada.")}
             </p>
+            {!!contas.length && <select aria-label={t("Conta disponível")} className="h-9 rounded-md border bg-background px-3 text-sm" value={accountId} onChange={(e) => setAccountId(e.target.value)}>
+              <option value="">{t("Selecione uma conta")}</option>
+              {contas.map((conta) => <option key={`${conta.platform}:${conta.account_id}`} value={conta.account_id}>{conta.display_name} · {conta.platform}</option>)}
+            </select>}
           </div>
 
           <div className="flex flex-col gap-1.5">
@@ -190,6 +215,7 @@ export function CanalParceiroClient() {
           </div>
 
           <div>
+            <Button className="mr-2" variant="outline" onClick={() => void buscarContas()} disabled={salvando || !apiKey}>{t("Buscar contas")}</Button>
             <Button onClick={conectar} disabled={salvando || !accountId || !apiKey}>
               {salvando ? t("Verificando…") : conectado ? t("Reconectar") : t("Conectar")}
             </Button>
@@ -199,6 +225,14 @@ export function CanalParceiroClient() {
           </div>
         </div>
       </Card>
+
+      {!!estado?.connections?.length && <Card className="flex flex-col gap-3 p-4">
+        <h3 className="text-sm font-semibold">{t("Contas conectadas")}</h3>
+        {estado.connections.map((item) => <div key={item.channel_session_id} className="flex items-center justify-between gap-3 rounded-md border p-3">
+          <div><p className="text-sm font-medium">{item.display_name ?? item.account_id}</p><p className="text-xs text-muted-foreground">{item.platform} · {item.status ?? "—"}</p></div>
+          <ChannelAiAccess channelId={item.channel_session_id} />
+        </div>)}
+      </Card>}
 
       {/* Só depois de conectar: antes disso não há URL nem segredo a mostrar, e
           um passo 2 vazio faz parecer que falta algo que ainda não podia existir. */}
