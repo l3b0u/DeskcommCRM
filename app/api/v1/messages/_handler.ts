@@ -746,7 +746,7 @@ export async function sendMessageHandler(
               // credencial da tela é achada. Sem ele, a resolução não casaria
               // linha nenhuma e o envio voltaria ao ambiente.
               sessionRef: resolveSessionRef(c.channel_sessions),
-              to: chatId,
+              to: chatId ?? "",
               name: input.template_name ?? "",
               language: input.template_language ?? "",
               values: input.template_values ?? {},

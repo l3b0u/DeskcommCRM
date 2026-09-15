@@ -22,10 +22,12 @@ import type { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 
 import { fail, ok } from "@/lib/api/wrappers";
+import { audit } from "@/lib/audit";
 import { requireRole } from "@/lib/auth/require-role";
 import {
   PARTNER_CHANNEL_LABEL,
-  findPartnerSession,
+  listPartnerAccounts,
+  listPartnerSessions,
   savePartnerSession,
   validatePartnerCredentials,
 } from "@/lib/channels/connect";
@@ -38,7 +40,7 @@ export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 
 const conectarSchema = z.object({
-  account_id: z.string().trim().min(1).max(200),
+  account_id: z.string().trim().min(1).max(200).optional(),
   api_key: z.string().trim().min(8).max(500),
 });
 
@@ -75,7 +77,8 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
   if (!authz.ok) return authz.response;
   const orgId = authz.org.orgId;
 
-  const sessao = await findPartnerSession(createAdminClient(), orgId);
+  const sessoes = await listPartnerSessions(createAdminClient(), orgId);
+  const sessao = sessoes[0] ?? null;
   const conectado = !!sessao && !sessao.archivedAt;
 
   return ok(
@@ -91,6 +94,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
       has_api_key: conectado ? sessao.hasApiKey : false,
       webhook_url:
         conectado && sessao.webhookPathToken ? urlDoWebhook(req, sessao.webhookPathToken) : null,
+      connections: sessoes.map((item) => ({ channel_session_id: item.id, account_id: item.accountId, platform: item.platform, display_name: item.displayName, status: item.status, has_api_key: item.hasApiKey, webhook_url: item.webhookPathToken ? urlDoWebhook(req, item.webhookPathToken) : null })),
     },
     { requestId },
   );
@@ -101,6 +105,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   if (supportDenied) return supportDenied;
 
   const requestId = randomUUID();
+  if (!z.string().uuid().safeParse(req.headers.get("Idempotency-Key")).success) return fail("invalid_request", "Idempotency-Key deve ser UUID.", 422, { requestId });
   // Conectar um canal move dinheiro e expõe a conta da empresa: é decisão de
   // dono, não de quem atende.
   const authz = await requireRole("admin", { requestId, resource: "channels_partner" });
@@ -110,7 +115,33 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
 
   const parsed = conectarSchema.safeParse(await req.json().catch(() => null));
   if (!parsed.success) {
-    return fail("invalid_request", t("account_id e api_key são obrigatórios"), 422, { requestId });
+    return fail("invalid_request", t("api_key é obrigatória"), 422, { requestId });
+  }
+
+  if (!parsed.data.account_id) {
+    const descoberta = await listPartnerAccounts(parsed.data.api_key);
+    if (!descoberta.ok) return fail("invalid_request", descoberta.reason, 422, { requestId });
+    return ok({
+      accounts: descoberta.accounts.map((account) => ({
+        account_id: account.accountId,
+        platform: account.platform,
+        display_name: account.displayName,
+        username: account.username,
+        capabilities: {
+          inbox: account.capabilities.inbox,
+          dms: account.capabilities.dms,
+          comments: {
+            list: account.capabilities.comments.list,
+            reply: account.capabilities.comments.reply,
+            private_reply: account.capabilities.comments.privateReply,
+          },
+          reviews: account.capabilities.reviews,
+          publishing: account.capabilities.publishing,
+          webhooks: account.capabilities.webhooks,
+          limitations: account.capabilities.limitations,
+        },
+      })),
+    }, { requestId });
   }
 
   // A rota não sabe com quem fala: pergunta se a credencial presta e o canal responde.
@@ -138,12 +169,12 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     );
   }
 
-  const existente = await findPartnerSession(admin, orgId);
+  const existente = (await listPartnerSessions(admin, orgId)).find((item) => item.accountId === parsed.data.account_id && item.platform === v.platform) ?? null;
   // Reconectar por cima de um canal excluído RESSUSCITA a linha, e o token de
   // webhook é preservado para não invalidar o que já está colado do outro lado.
   const token = existente?.webhookPathToken ?? randomBytes(16).toString("hex");
 
-  const { error } = await savePartnerSession(admin, {
+  const { id: sessionId, error } = await savePartnerSession(admin, {
     organizationId: orgId,
     existingId: existente?.id ?? null,
     accountId: parsed.data.account_id.trim(),
@@ -152,8 +183,12 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     webhookSecretEncrypted: segredoCifrado,
     phoneNumber: v.phoneNumber ? `+${v.phoneNumber.replace(/\D/g, "")}` : null,
     displayName: v.displayName ?? PARTNER_CHANNEL_LABEL,
+    platform: v.platform,
+    capabilities: v.capabilities,
   });
   if (error) return fail("internal_error", error, 500, { requestId });
+
+  await audit({ action: existente ? "channel.reconnected" : "channel.connected", actorUserId: authz.user.id, organizationId: orgId, resourceType: "channel_session", resourceId: sessionId, requestId, metadata: { platform: v.platform, account_id: parsed.data.account_id } });
 
   return ok(
     {
@@ -161,6 +196,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       phone_number: v.phoneNumber ? `+${v.phoneNumber.replace(/\D/g, "")}` : null,
       display_name: v.displayName ?? PARTNER_CHANNEL_LABEL,
       quality_rating: v.qualityRating,
+      platform: v.platform,
       webhook_url: urlDoWebhook(req, token),
       // Volta UMA vez, porque o operador precisa colá-lo no provedor.
       webhook_secret: segredoWebhook,

@@ -130,6 +130,53 @@ async function zernioInbound(
   }
   const payload = leitura.envelope;
 
+  const { data: conta } = await admin
+    .from("channel_sessions")
+    .select("zernio_account_id, zernio_platform, metadata")
+    .eq("organization_id", input.session.organization_id)
+    .eq("id", input.session.id)
+    .single();
+
+  // Reserva depois de autenticar E validar. Se o processamento abaixo lançar,
+  // a reserva é removida para que a retentativa do provedor possa concluir.
+  const eventId = input.headers.get("x-zernio-event-id") ??
+    (typeof payload.id === "string" ? payload.id : null);
+  if (eventId) {
+    const eventType = input.headers.get("x-zernio-event") ??
+      (typeof payload.event === "string" ? payload.event : "unknown");
+    let { error } = await admin.from("zernio_webhook_event_receipts").insert({
+      organization_id: input.session.organization_id,
+      channel_session_id: input.session.id,
+      event_id: eventId,
+      event_type: eventType,
+    });
+    if (error?.code === "23505") {
+      const { data: receipt } = await admin.from("zernio_webhook_event_receipts")
+        .select("processed_at")
+        .eq("organization_id", input.session.organization_id)
+        .eq("channel_session_id", input.session.id)
+        .eq("event_id", eventId)
+        .maybeSingle();
+      if (receipt?.processed_at) {
+        return { ok: true, body: { status: "duplicate", reason: "event_id_repetido" } };
+      }
+      await admin.from("zernio_webhook_event_receipts").delete()
+        .eq("organization_id", input.session.organization_id)
+        .eq("channel_session_id", input.session.id)
+        .eq("event_id", eventId)
+        .is("processed_at", null);
+      ({ error } = await admin.from("zernio_webhook_event_receipts").insert({
+        organization_id: input.session.organization_id,
+        channel_session_id: input.session.id,
+        event_id: eventId,
+        event_type: eventType,
+      }));
+    }
+    if (error) throw new Error(`zernio_event_receipt_failed: ${error.message}`);
+  }
+
+  try {
+
   // ─── O que a plataforma decide sozinha ───────────────────────────────────
   //
   // Revisão de modelo e mudança de estado do número não são mensagens, mas são
@@ -192,6 +239,30 @@ async function zernioInbound(
     organizationId: input.session.organization_id,
     channelSessionId: input.session.id,
     payload,
+    expectedAccountId: conta?.zernio_account_id,
+    expectedPlatform: conta?.zernio_platform,
+    expectedCapabilities: conta?.metadata && typeof conta.metadata === "object"
+      ? (conta.metadata as Record<string, unknown>).zernio_capabilities as never
+      : null,
   });
-  return { ok: true, body: { ...r } };
+    return { ok: true, body: { ...r } };
+  } catch (error) {
+    if (eventId) {
+      await admin
+        .from("zernio_webhook_event_receipts")
+        .delete()
+        .eq("organization_id", input.session.organization_id)
+        .eq("channel_session_id", input.session.id)
+        .eq("event_id", eventId);
+    }
+    throw error;
+  } finally {
+    if (eventId) {
+      await admin.from("zernio_webhook_event_receipts")
+        .update({ processed_at: new Date().toISOString() })
+        .eq("organization_id", input.session.organization_id)
+        .eq("channel_session_id", input.session.id)
+        .eq("event_id", eventId);
+    }
+  }
 }

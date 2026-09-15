@@ -170,6 +170,8 @@ export interface ChannelAdapter {
   provider: ChannelProvider;
   /** null = não há endereço possível para este contato neste canal. */
   resolveRecipient(input: RecipientInput): string | null;
+  /** true quando uma thread do provider basta mesmo sem telefone/identidade no contato. */
+  readonly canAddressByThread?: boolean;
   /**
    * O canal tem credencial para enviar? Perguntado ANTES de `send` porque
    * `{externalId: null}` colapsa "não tentei" com "tentei e a resposta não

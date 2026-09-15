@@ -8815,7 +8815,6 @@ export const DICIONARIO: Traducoes = {
   "Erro ao reativar tenant": { es: "Error al reactivar el tenant" },
   "Incidente resolvido com sucesso": { es: "Incidente resuelto con éxito" },
   "Erro ao resolver incidente": { es: "Error al resolver el incidente" },
-
   // ═══ Tags: a tela do vocabulário de etiquetas, da fatia S4 da #852 ═══
   //
   // A tela nasceu com dez chamadas `t()` e o espanhol ficou para trás: a lista
@@ -8899,6 +8898,14 @@ export const DICIONARIO: Traducoes = {
   "Um material marcado aqui foi arquivado no acervo — o agente não lê mais ele.": { es: "Un material marcado aquí fue archivado en el acervo — el agente ya no lo lee." },
   "Materiais marcados aqui foram arquivados no acervo — o agente não lê mais eles.": { es: "Materiales marcados aquí fueron archivados en el acervo — el agente ya no los lee." },
   "Desmarque para voltar a salvar.": { es: "Desmárcalo para volver a guardar." },
+  "Contas encontradas.": { es: "Cuentas encontradas." },
+  "Não foi possível buscar as contas.": { es: "No fue posible buscar las cuentas." },
+  "Conecte as contas sociais alcançadas pela sua chave. Mensagens e interações suportadas entram e saem pelo mesmo atendimento.": { es: "Conecta las cuentas sociales accesibles con tu clave. Los mensajes y las interacciones compatibles entran y salen por la misma atención." },
+  "Escolha uma das contas alcançadas pela chave. Cada rede fica como uma conexão separada.": { es: "Elige una de las cuentas accesibles con tu clave. Cada red queda como una conexión separada." },
+  "Conta disponível": { es: "Cuenta disponible" },
+  "Selecione uma conta": { es: "Selecciona una cuenta" },
+  "Buscar contas": { es: "Buscar cuentas" },
+  "Contas conectadas": { es: "Cuentas conectadas" },
 };
 
 /**

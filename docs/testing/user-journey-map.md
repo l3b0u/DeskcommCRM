@@ -952,6 +952,7 @@ ação `send_ai_message`, retomada manual (`lib/escalacao/retomada.ts`).
 | J20.17 | Cliente antigo irritado (gate allowlist, não autorizado) → worker de sentimento dispara `low_sentiment` | `triggerHandoff` NÃO dispara: sem "um humano vai te atender", sem mexer no estado da conversa | **UNIT** — `handoff-orchestrator-elegibilidade.test.ts` (`bloqueioPorAllowlist` e `conversa_silenciada` barram; fail-closed em erro) |
 | J20.18 | Eu respondo o cliente à mão pelo meu WhatsApp numa conversa autorizada | IA para naquela conversa por um PRAZO (`PRAZO_DO_SILENCIO_MS`, 60 min) renovado a cada nova fala humana, SEM apagar `ai_authorized_at`; volta sozinha quando o prazo vence, ou antes por "devolver ao automático" | **UNIT** — `atendimento-manual.test.ts` (as duas pontas do prazo medidas pelo motor real `decidirElegibilidade`, renovação, e o que NUNCA encurta: `'infinity'` do handoff formal e janela mais longa) + `waha-ingest-atendimento-manual.test.ts` (via `dispatchWahaEvent` real; eco do próprio envio NÃO pausa) + guarda de fonte no Zernio + fiação em `handoff-fernando-fiacao.test.ts`; **E2E** — `tests/e2e/j20-elegibilidade-atendimento-manual.spec.ts` (webhook `fromMe` genuíno → `bot_silenced_until` finito e futuro, nunca `'infinity'`, + rastro; `ai_authorized_at` intacto; 2ª mensagem RENOVA o prazo; tela mostra o selo; "devolver ao automático" solta a trava e a autorização continua) |
 | J20.19 | Worker parado acorda com backlog; dois inbound antigos com o MESMO `sent_at` | a "última inbound" é a mais RECENTE (por `created_at`), nunca a de maior uuid — o evento antigo é pulado | **INVARIANTE** — `tests/invariants/drain-recencia-inbound.test.ts` (Postgres real) + `drain.test.ts` guarda a cláusula `coalesce(sent_at, created_at)` |
+| J20.24 | Eu conecto uma conta social do provedor parceiro e respondo no mesmo atendimento | A chave lista contas; a conexão mostra rede/capacidades; DM e comentário autenticados entram uma vez e acionam lead, automação e agente | **UNIT** — `zernio-platform-capabilities.test.ts`, `zernio-social-webhooks.test.ts`, `channel-ingest-zernio.test.ts`, `canal-parceiro-tela.test.tsx`; **DB** — `canal-identificador-unico-entre-ativos.test.ts` + RLS das identidades/recibos; **E2E visual pendente nesta entrega** |
 
 **Sabotagem que confirma:** removendo o veto `sem_autorizacao` de
 `decidirElegibilidade`, `gate.test.ts` e `drain.test.ts` reprovam; restaurado,
@@ -2311,7 +2312,6 @@ healthcheck, levando junto o `psql` do baseline — o log do CLI é que diz
 `container is not ready: unhealthy`; e um Realtime unhealthy varrendo o WAL levou o
 Postgres a `57014 statement timeout` e o GoTrue a `504`. **O Realtime não foi
 exercitado nesta rodada.**
-
 ---
 
 ## J24 — O vocabulário de etiquetas da organização `[P1]` (2026-09-15)

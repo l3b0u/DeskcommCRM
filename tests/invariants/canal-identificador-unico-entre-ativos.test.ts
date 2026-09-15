@@ -64,15 +64,19 @@ describe("0165 · a colisão de identificador é impossível, não improvável",
     expect(erro).toContain("channel_sessions_meta_phone_number_id_ativo_unique");
   });
 
-  it("duas ORGANIZAÇÕES não podem ter o mesmo zernio_account_id ativo", () => {
+  it("duas ORGANIZAÇÕES não podem selecionar a mesma conta externa ativa", () => {
     const a = novaOrg(`inv-0165-zer-a-${Date.now()}`);
     const b = novaOrg(`inv-0165-zer-b-${Date.now()}`);
-    insertSession(a, { provider: `'zernio'`, zernio_account_id: `'0165-acc'` });
+    insertSession(a, { provider: `'zernio'`, zernio_platform: `'instagram'`, zernio_account_id: `'0165-acc'` });
+    const erro = erroDe(() => insertSession(b, { provider: `'zernio'`, zernio_platform: `'instagram'`, zernio_account_id: `'0165-acc'` }));
+    expect(erro).toContain("channel_sessions_zernio_conta_ativa_global_unique");
+  });
 
-    const erro = erroDe(() =>
-      insertSession(b, { provider: `'zernio'`, zernio_account_id: `'0165-acc'` }),
-    );
-    expect(erro).toContain("channel_sessions_zernio_account_id_ativo_unique");
+  it("a MESMA organização não duplica plataforma+conta Zernio ativa", () => {
+    const org = novaOrg(`inv-0232-zer-${Date.now()}`);
+    insertSession(org, { provider: `'zernio'`, zernio_platform: `'instagram'`, zernio_account_id: `'0232-acc'` });
+    const erro = erroDe(() => insertSession(org, { provider: `'zernio'`, zernio_platform: `'instagram'`, zernio_account_id: `'0232-acc'` }));
+    expect(erro).toContain("channel_sessions_zernio_conta_ativa_global_unique");
   });
 
   it("a MESMA organização também não repete o identificador", () => {
@@ -138,10 +142,10 @@ describe("0165 · a colisão de identificador é impossível, não improvável",
   });
 });
 
-describe("0165 · o recorte do índice é o mesmo que o código consulta", () => {
-  for (const [coluna, indice] of [
-    ["meta_phone_number_id", "channel_sessions_meta_phone_number_id_ativo_unique"],
-    ["zernio_account_id", "channel_sessions_zernio_account_id_ativo_unique"],
+describe("0165/0232 · o recorte do índice é o mesmo que o código consulta", () => {
+  for (const [colunas, indice] of [
+    ["(meta_phone_number_id)", "channel_sessions_meta_phone_number_id_ativo_unique"],
+    ["(zernio_platform, zernio_account_id)", "channel_sessions_zernio_conta_ativa_global_unique"],
   ] as const) {
     it(`${indice} é ÚNICO e parcial em archived_at is null`, () => {
       // Vale como asserção estrutural (as de comportamento estão acima) porque a
@@ -152,7 +156,7 @@ describe("0165 · o recorte do índice é o mesmo que o código consulta", () =>
       const def = sql(`select indexdef from pg_indexes
                         where schemaname = 'public' and indexname = '${indice}'`);
       expect(def).toContain("CREATE UNIQUE INDEX");
-      expect(def).toContain(`(${coluna})`);
+      expect(def).toContain(colunas);
       expect(def).toContain("archived_at IS NULL");
     });
   }

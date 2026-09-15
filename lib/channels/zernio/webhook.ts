@@ -24,6 +24,7 @@
  * saber o que está guardando.
  */
 import { createHmac, timingSafeEqual } from "node:crypto";
+import { isZernioPlatform, ZERNIO_CAPABILITIES, type ZernioPlatform } from "./platform-capabilities";
 
 /** Assinatura HMAC-SHA256 no header `X-Zernio-Signature`. */
 export function verifyZernioSignature(
@@ -72,6 +73,7 @@ export interface ZernioInboundMessage {
   externalId: string;
   /** Conta conectada que recebeu — casa com `channel_sessions.zernio_account_id`. */
   accountId: string | null;
+  platform: ZernioPlatform;
   text: string | null;
   attachments: { type: string; url: string }[];
   sentAt: string | null;
@@ -83,9 +85,19 @@ export interface ZernioInboundMessage {
    * diz*) — quem interpreta é `lib/leads/atribuicao-de-anuncio.ts`.
    */
   referral: unknown;
+  interaction: null | {
+    kind: "comment" | "review";
+    postId?: string;
+    commentId?: string;
+    authorId?: string;
+    reviewId?: string;
+    publicReply: boolean;
+    privateReply: boolean;
+  };
 }
 
 export interface ZernioIdentity {
+  externalId: string | null;
   /** E.164 COM `+`, quando a pessoa expõe telefone. */
   phone: string | null;
   /** Âncora canônica da Meta para o usuário dentro do negócio. */
@@ -120,7 +132,8 @@ export function resolveZernioIdentity(sender: Bruto | null): ZernioIdentity {
   const s = sender ?? {};
   const phone = str(s.phoneNumber);
   const bsuid = str(s.businessScopedUserId);
-  const username = str(s.whatsappUsername);
+  const username = str(s.whatsappUsername) ?? str(s.username);
+  const externalId = str(s.businessScopedUserId) ?? str(s.id);
   const displayName = str(s.name) ?? str(s.displayName);
 
   const anchor = bsuid
@@ -129,7 +142,7 @@ export function resolveZernioIdentity(sender: Bruto | null): ZernioIdentity {
       ? ({ kind: "phone", value: phone } as const)
       : null;
 
-  return { phone, bsuid, username, displayName, anchor };
+  return { phone, bsuid, username, displayName, externalId, anchor };
 }
 
 /**
@@ -175,9 +188,11 @@ export function parseZernioEdicao(payload: unknown): ZernioEdicao | null {
 
   const m = obj(p.message);
   if (!m) return null;
-  // Mesma regra do parser de mensagem: a conta serve outras plataformas, e uma
-  // edição de DM de outra rede não tem linha nossa para corrigir.
-  if (str(m.platform) !== "whatsapp") return null;
+  // O contrato já exercitado para WhatsApp continua válido; Telegram é a outra
+  // plataforma que documenta edição. Não generalizamos o evento às redes que
+  // apenas compartilham o mesmo envelope.
+  const platform = str(m.platform);
+  if (platform !== "whatsapp" && platform !== "telegram") return null;
 
   const externalId = str(m.platformMessageId) ?? str(m.id);
   if (!externalId) return null;
@@ -200,9 +215,8 @@ export function parseZernioInbound(payload: unknown): ZernioInboundMessage | nul
   const m = obj(p.message);
   if (!m) return null;
 
-  // Só WhatsApp: a mesma conta serve outras plataformas, e um DM de outra rede
-  // entrando como conversa de WhatsApp é pior que ignorá-lo.
-  if (str(m.platform) !== "whatsapp") return null;
+  const platform = str(m.platform);
+  if (!isZernioPlatform(platform) || !ZERNIO_CAPABILITIES[platform].dms.send) return null;
 
   const conversationId = str(m.conversationId);
   const externalId = str(m.platformMessageId) ?? str(m.id);
@@ -225,6 +239,7 @@ export function parseZernioInbound(payload: unknown): ZernioInboundMessage | nul
     conversationId,
     externalId,
     accountId: str(obj(p.account)?.id) ?? str(obj(p.account)?.accountId) ?? str(p.accountId),
+    platform,
     text: str(m.text),
     attachments,
     sentAt: str(m.sentAt),
@@ -241,6 +256,52 @@ export function parseZernioInbound(payload: unknown): ZernioInboundMessage | nul
     // clique de anúncio nesta instalação) — tenta na mensagem primeiro (forma
     // documentada da Cloud API), cai para o nível do evento como fallback.
     referral: m.referral ?? p.referral ?? null,
+    interaction: null,
+  };
+}
+
+/** Comentários viram threads estáveis por post+autor no cockpit. */
+export function parseZernioCommentAsMessage(payload: unknown): ZernioInboundMessage | null {
+  const p = obj(payload);
+  if (!p || str(p.event) !== "comment.received") return null;
+  const comment = obj(p.comment);
+  const author = obj(comment?.author);
+  const platform = str(comment?.platform) ?? str(obj(p.account)?.platform);
+  if (!comment || !isZernioPlatform(platform) || !ZERNIO_CAPABILITIES[platform].comments.list) return null;
+  if (author?.isOwnAccount === true) return null;
+  const postId = str(comment.platformPostId) ?? str(comment.postId) ?? str(obj(p.post)?.platformPostId) ?? str(obj(p.post)?.id);
+  const commentId = str(comment.platformCommentId) ?? str(comment.id);
+  const authorId = str(author?.id);
+  if (!postId || !commentId || !authorId) return null;
+  return {
+    direction: "inbound", kind: "message", conversationId: `comment:${postId}:${authorId}`,
+    externalId: commentId, accountId: str(obj(p.account)?.accountId) ?? str(obj(p.account)?.id) ?? str(p.accountId),
+    platform, text: str(comment.message) ?? str(comment.text) ?? str(comment.content), attachments: [],
+    sentAt: str(comment.createdAt) ?? str(comment.createdTime) ?? str(p.timestamp),
+    identity: resolveZernioIdentity(author), referral: null,
+    interaction: { kind: "comment", postId, commentId, authorId, publicReply: ZERNIO_CAPABILITIES[platform].comments.reply, privateReply: ZERNIO_CAPABILITIES[platform].comments.privateReply },
+  };
+}
+
+/** Reviews ficam visíveis no atendimento como uma thread por review. */
+export function parseZernioReviewAsMessage(payload: unknown): ZernioInboundMessage | null {
+  const p = obj(payload);
+  const event = str(p?.event);
+  if (!p || (event !== "review.new" && event !== "review.updated")) return null;
+  const review = obj(p.review);
+  const reviewer = obj(review?.reviewer) ?? obj(review?.author);
+  const platform = str(review?.platform) ?? str(obj(p.account)?.platform);
+  if (!review || !isZernioPlatform(platform) || !ZERNIO_CAPABILITIES[platform].reviews.list) return null;
+  const reviewId = str(review.id) ?? str(review.reviewId);
+  const reviewerId = str(reviewer?.id) ?? `${platform}:anonymous:${reviewId}`;
+  if (!reviewId) return null;
+  return {
+    direction: "inbound", kind: "message", conversationId: `review:${reviewId}`,
+    externalId: `${reviewId}:${event}`, accountId: str(obj(p.account)?.accountId) ?? str(obj(p.account)?.id) ?? str(p.accountId),
+    platform, text: str(review.comment) ?? str(review.text) ?? "Nova avaliação",
+    attachments: [], sentAt: str(review.updateTime) ?? str(review.createTime) ?? str(p.timestamp),
+    identity: resolveZernioIdentity({ ...(reviewer ?? {}), id: reviewerId }), referral: null,
+    interaction: { kind: "review", reviewId, publicReply: ZERNIO_CAPABILITIES[platform].reviews.reply, privateReply: false },
   };
 }
 
@@ -254,6 +315,7 @@ function participanteDaConversa(c: Bruto | null): Bruto | null {
   // isso o MESMO cliente viraria dois contatos, um por direção.
   const digitos = id.replace(/\D/g, "");
   return {
+    id,
     phoneNumber: digitos.length >= 8 ? `+${digitos}` : null,
     name: str(c.participantName),
   };

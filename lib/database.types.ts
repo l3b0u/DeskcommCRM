@@ -3003,6 +3003,7 @@ export type Database = {
           webhook_path_token: string
           webhook_secret_encrypted: string
           zernio_account_id: string | null
+          zernio_platform: string | null
           zernio_token_encrypted: string | null
         }
         Insert: {
@@ -3036,6 +3037,7 @@ export type Database = {
           webhook_path_token?: string
           webhook_secret_encrypted: string
           zernio_account_id?: string | null
+          zernio_platform?: string | null
           zernio_token_encrypted?: string | null
         }
         Update: {
@@ -3069,6 +3071,7 @@ export type Database = {
           webhook_path_token?: string
           webhook_secret_encrypted?: string
           zernio_account_id?: string | null
+          zernio_platform?: string | null
           zernio_token_encrypted?: string | null
         }
         Relationships: [
@@ -3078,6 +3081,73 @@ export type Database = {
             isOneToOne: false
             referencedRelation: "organizations"
             referencedColumns: ["id"]
+          },
+        ]
+      }
+      contact_channel_identities: {
+        Row: {
+          channel_session_id: string
+          contact_id: string
+          created_at: string
+          display_name: string | null
+          external_user_id: string
+          id: string
+          metadata: Json
+          organization_id: string
+          platform: string
+          provider: string
+          updated_at: string
+          username: string | null
+        }
+        Insert: {
+          channel_session_id: string
+          contact_id: string
+          created_at?: string
+          display_name?: string | null
+          external_user_id: string
+          id?: string
+          metadata?: Json
+          organization_id: string
+          platform: string
+          provider: string
+          updated_at?: string
+          username?: string | null
+        }
+        Update: {
+          channel_session_id?: string
+          contact_id?: string
+          created_at?: string
+          display_name?: string | null
+          external_user_id?: string
+          id?: string
+          metadata?: Json
+          organization_id?: string
+          platform?: string
+          provider?: string
+          updated_at?: string
+          username?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "contact_channel_identities_contact_tenant_fkey"
+            columns: ["organization_id", "contact_id"]
+            isOneToOne: false
+            referencedRelation: "contacts"
+            referencedColumns: ["organization_id", "id"]
+          },
+          {
+            foreignKeyName: "contact_channel_identities_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "contact_channel_identities_session_tenant_fkey"
+            columns: ["organization_id", "channel_session_id"]
+            isOneToOne: false
+            referencedRelation: "channel_sessions"
+            referencedColumns: ["organization_id", "id"]
           },
         ]
       }
@@ -7615,6 +7685,51 @@ export type Database = {
         ]
       }
     }
+      zernio_webhook_event_receipts: {
+        Row: {
+          channel_session_id: string
+          event_id: string
+          event_type: string
+          id: string
+          organization_id: string
+          processed_at: string | null
+          received_at: string
+        }
+        Insert: {
+          channel_session_id: string
+          event_id: string
+          event_type: string
+          id?: string
+          organization_id: string
+          processed_at?: string | null
+          received_at?: string
+        }
+        Update: {
+          channel_session_id?: string
+          event_id?: string
+          event_type?: string
+          id?: string
+          organization_id?: string
+          processed_at?: string | null
+          received_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "zernio_webhook_event_receipts_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "zernio_webhook_event_receipts_session_tenant_fkey"
+            columns: ["organization_id", "channel_session_id"]
+            isOneToOne: false
+            referencedRelation: "channel_sessions"
+            referencedColumns: ["organization_id", "id"]
+          },
+        ]
+      }
     Views: {
       calendar_google_reconcilable_appointments: {
         Row: Database["public"]["Tables"]["calendar_appointments"]["Row"]

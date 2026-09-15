@@ -8,6 +8,10 @@ Se você roda o DeskcommCRM numa VPS, **leia a seção da versão para a qual es
 
 ## [Não lançado]
 
+### Adicionado
+
+- **Atendimento social no mesmo cockpit** A conexão pelo provedor parceiro agora lista as contas disponíveis e permite conectar múltiplas redes. DMs de Instagram e Facebook, comentários e avaliações entram no atendimento com identidade social separada da identidade WhatsApp; respostas usam os endpoints oficiais da mesma conta.
+
 ## [1.30.0] — 2026-09-16
 
 ### Adicionado
@@ -221,7 +225,6 @@ Se você roda o DeskcommCRM numa VPS, **leia a seção da versão para a qual es
   passa a ser gravada em `.env.supabase-provision` (só leitura pelo dono, 600)
   antes de o projeto ser criado; quando um passo falha, a mensagem diz onde ela
   está; e uma segunda tentativa reaproveita a mesma senha em vez de gerar outra.
-
 ## [1.28.0] — 2026-09-16
 
 ### Adicionado

@@ -24,13 +24,29 @@ const SESSAO = {
   phone_number: "+5531999990000",
   webhook_secret_encrypted: "\\xabcd",
   archived_at: null,
+  zernio_account_id: "6a3572a15f7d1751ab117832",
+  zernio_platform: "whatsapp",
 };
 const SECRET = "segredo-longo-o-suficiente";
 
 const arquivoFechado: { status: string; erro?: string | null; validSignature: boolean | null }[] = [];
 const ingeridos: unknown[] = [];
 
-vi.mock("@/lib/supabase/admin", () => ({ createAdminClient: () => ({}) }));
+vi.mock("@/lib/supabase/admin", () => ({
+  createAdminClient: () => {
+    const chain: Record<string, unknown> = {};
+    chain.insert = async () => ({ error: null });
+    chain.select = () => chain;
+    chain.update = () => chain;
+    chain.delete = () => chain;
+    chain.eq = () => chain;
+    chain.is = () => chain;
+    chain.single = async () => ({ data: SESSAO, error: null });
+    chain.maybeSingle = async () => ({ data: null, error: null });
+    chain.then = (ok: (value: unknown) => unknown) => ok({ data: null, error: null });
+    return { from: () => chain };
+  },
+}));
 
 vi.mock("@/lib/channels/archived", () => ({
   ARCHIVED_AT: "archived_at",

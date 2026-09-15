@@ -42,6 +42,7 @@ import { decryptWebhookSecret } from "@/lib/webhooks/secrets";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
+const MAX_WEBHOOK_BODY_BYTES = 1_048_576;
 
 export async function POST(
   req: NextRequest,
@@ -56,7 +57,14 @@ export async function POST(
     return fail("not_found", "unknown webhook token", 404, { requestId });
   }
 
+  const announced = Number(req.headers.get("content-length") ?? "0");
+  if (Number.isFinite(announced) && announced > MAX_WEBHOOK_BODY_BYTES) {
+    return fail("payload_too_large", "webhook_body_too_large", 413, { requestId });
+  }
   const rawBody = await req.text();
+  if (Buffer.byteLength(rawBody, "utf8") > MAX_WEBHOOK_BODY_BYTES) {
+    return fail("payload_too_large", "webhook_body_too_large", 413, { requestId });
+  }
   const admin = createAdminClient();
 
   const { data } = await queryTolerantToMissingArchived(

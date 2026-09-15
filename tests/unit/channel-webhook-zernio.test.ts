@@ -177,8 +177,10 @@ describe("parse — o que RECUSA", () => {
   const recusa = (p: unknown) => expect(parseZernioInbound(p)).toBeNull();
 
   it("evento que não é de mensagem nem de desfecho", () => recusa(payload({ event: "post.published" })));
-  it("outra plataforma — DM de outra rede não é conversa de WhatsApp", () =>
-    recusa(payload({}, { platform: "instagram" })));
+  it("Instagram usa o mesmo contrato de DM sem virar identidade WhatsApp", () => {
+    const parsed = parseZernioInbound(payload({}, { platform: "instagram", sender: { id: "ig_42", username: "ana" } }));
+    expect(parsed).toMatchObject({ platform: "instagram", identity: { externalId: "ig_42", anchor: null } });
+  });
   it("sem conversationId — sem thread não há o que endereçar depois", () =>
     recusa(payload({}, { conversationId: null })));
   it("sem nenhum id de mensagem — não há chave de idempotência", () =>
