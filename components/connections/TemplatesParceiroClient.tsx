@@ -75,17 +75,24 @@ export function TemplatesParceiroClient() {
   const [botoes, setBotoes] = useState<BotaoDaDefinicao[]>([]);
   const [subindo, setSubindo] = useState(false);
   const [aberto, setAberto] = useState<string | null>(null);
+  const [sessionId, setSessionId] = useState("");
 
   // Quantas amostras a revisão vai exigir. Recalculado enquanto se digita: o
   // operador vê o campo aparecer no instante em que escreve `{{1}}`, e não
   // descobre a exigência numa recusa que chega horas depois.
   const nVariaveis = contarVariaveis(corpo);
 
+  const conexoes = useQuery({
+    queryKey: ["partner-connections-for-templates"],
+    queryFn: async () => apiClient.get<{ data: { connections?: Array<{ channel_session_id: string; display_name: string | null; platform: string }> } }>("/api/v1/channels/partner"),
+  });
+
   const lista = useQuery({
-    queryKey: ["partner-templates"],
+    queryKey: ["partner-templates", sessionId],
+    enabled: Boolean(sessionId),
     queryFn: async () =>
       apiClient.get<{ data: { templates: TemplateParceiro[] } }>(
-        "/api/v1/channels/partner/templates",
+        `/api/v1/channels/partner/templates?channel_session_id=${encodeURIComponent(sessionId)}`,
       ),
   });
 
@@ -93,7 +100,7 @@ export function TemplatesParceiroClient() {
     mutationFn: async (corpoReq: Record<string, unknown>) =>
       apiClient.post<{ data: { sincronizadas: number; total: number } }>(
         "/api/v1/channels/partner/templates",
-        corpoReq,
+        { ...corpoReq, channel_session_id: sessionId },
       ),
     onSuccess: (r) => {
       qc.invalidateQueries({ queryKey: ["partner-templates"] });
@@ -125,15 +132,20 @@ export function TemplatesParceiroClient() {
             variant="outline"
             size="sm"
             onClick={() => acao.mutate({ acao: "sincronizar" })}
-            disabled={acao.isPending}
+            disabled={acao.isPending || !sessionId}
           >
             {acao.isPending ? t("Sincronizando…") : t("Sincronizar")}
           </Button>
-          <Button type="button" size="sm" onClick={() => setCriando((v) => !v)}>
+          <Button type="button" size="sm" disabled={!sessionId} onClick={() => setCriando((v) => !v)}>
             {criando ? t("Cancelar") : t("Criar modelo")}
           </Button>
         </div>
       </div>
+
+      <select aria-label={t("Conexão dos modelos")} value={sessionId} onChange={(e) => setSessionId(e.target.value)} className="h-9 rounded-md border border-input bg-background px-2 text-sm">
+        <option value="">{t("Selecione uma conexão")}</option>
+        {(conexoes.data?.data.connections ?? []).map((item) => <option key={item.channel_session_id} value={item.channel_session_id}>{item.display_name ?? item.channel_session_id} · {item.platform}</option>)}
+      </select>
 
       {criando && (
         <div className="grid gap-4 rounded-md border border-border p-3 lg:grid-cols-[1fr_20rem]">
@@ -224,6 +236,7 @@ export function TemplatesParceiroClient() {
                     fd.append("file", f);
                     const r = await fetch("/api/v1/channels/partner/templates/media", {
                       method: "POST",
+                      headers: { "Idempotency-Key": crypto.randomUUID() },
                       body: fd,
                     });
                     const j = (await r.json()) as { data?: { url?: string }; error?: { message?: string } };

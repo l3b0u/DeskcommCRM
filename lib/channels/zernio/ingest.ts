@@ -32,7 +32,8 @@ import { pausarIaPorAtendimentoManual } from "@/lib/escalacao/atendimento-manual
 
 import { aplicarEfeitosPosEntrada } from "../pos-entrada";
 
-import { parseZernioInbound, type ZernioIdentity, type ZernioInboundMessage } from "./webhook";
+import { parseZernioCommentAsMessage, parseZernioInbound, parseZernioReviewAsMessage, type ZernioIdentity, type ZernioInboundMessage } from "./webhook";
+import type { ZernioPlatformCapabilities } from "./platform-capabilities";
 
 export interface ZernioIngestResult {
   status: "ingested" | "duplicate" | "ignored" | "unknown_account";
@@ -67,28 +68,52 @@ export function waIdentityFrom(identity: ZernioIdentity): string | null {
  */
 export async function ingestZernioInbound(
   admin: SupabaseClient,
-  input: { organizationId: string; channelSessionId: string; payload: unknown },
+  input: {
+    organizationId: string;
+    channelSessionId: string;
+    payload: unknown;
+    expectedAccountId?: string | null;
+    expectedPlatform?: string | null;
+    expectedCapabilities?: ZernioPlatformCapabilities | null;
+  },
 ): Promise<ZernioIngestResult> {
-  const msg = parseZernioInbound(input.payload);
+  let msg = parseZernioInbound(input.payload) ?? parseZernioCommentAsMessage(input.payload) ?? parseZernioReviewAsMessage(input.payload);
   if (!msg) return { status: "ignored", reason: "evento_sem_interesse" };
+  if (
+    (input.expectedAccountId && msg.accountId && input.expectedAccountId !== msg.accountId) ||
+    (input.expectedPlatform && input.expectedPlatform !== msg.platform)
+  ) {
+    return { status: "unknown_account", reason: "conta_do_evento_nao_corresponde_ao_webhook" };
+  }
+  if (msg.interaction && input.expectedCapabilities) {
+    const publicReply = msg.interaction.kind === "comment"
+      ? input.expectedCapabilities.comments.reply
+      : input.expectedCapabilities.reviews.reply;
+    const privateReply = msg.interaction.kind === "comment"
+      ? input.expectedCapabilities.comments.privateReply
+      : false;
+    msg = { ...msg, interaction: { ...msg.interaction, publicReply, privateReply } };
+  }
 
   // Evento de DESFECHO: a mensagem já existe (ou nem é nossa). Só atualiza o
   // status — inserir aqui criaria uma segunda linha para a mesma mensagem, uma
   // por transição de estado.
   if (msg.kind === "status") {
-    const { data } = await admin
+    const { data, error } = await admin
       .from("messages")
       .update({
         status: msg.status,
         ...(msg.errorReason ? { error_message: msg.errorReason, error_code: "zernio_error" } : {}),
       })
       .eq("organization_id", input.organizationId)
+      .eq("channel_session_id", input.channelSessionId)
       .eq("external_id", msg.externalId)
       // Não rebaixa: `read` chegando depois de `delivered` é progresso, mas um
       // `delivered` atrasado depois de `read` voltaria o tique para trás. A
       // ordem de entrega do webhook não é garantida.
       .not("status", "in", "(read)")
       .select("id");
+    if (error) throw new Error(`zernio_status_update_failed: ${error.message}`);
     const afetadas = (data ?? []).length;
     return afetadas > 0
       ? { status: "ingested", reason: `status_${msg.status}` }
@@ -108,7 +133,12 @@ export async function ingestZernioInbound(
   // (âncora preferida) e a saída só traz o telefone do participante. Resolver
   // pela thread primeiro fecha isso na origem, e de quebra deixa a ingestão
   // imune a qualquer identidade nova que o provider invente depois.
-  const existente = await conversaPelaThread(admin, input.organizationId, msg.conversationId);
+  const existente = await conversaPelaThread(
+    admin,
+    input.organizationId,
+    input.channelSessionId,
+    msg.conversationId,
+  );
   if (existente) {
     const inseridaNaExistente = await insertMessage(admin, {
       organizationId: input.organizationId,
@@ -143,13 +173,15 @@ export async function ingestZernioInbound(
   }
 
   const identity = waIdentityFrom(msg.identity);
-  if (!identity) {
+  if (!identity && !msg.identity.externalId) {
     // Evento sem âncora utilizável. Recusar é o certo: criar contato anônimo
     // faria a próxima mensagem da MESMA pessoa virar um segundo contato.
     return { status: "ignored", reason: "sem_identidade_utilizavel" };
   }
 
-  const contactId = await upsertContact(admin, input.organizationId, msg, identity);
+  const contactId = identity
+    ? await upsertContact(admin, input.organizationId, msg, identity)
+    : await upsertSocialContact(admin, input.organizationId, input.channelSessionId, msg);
   if (!contactId) return { status: "ignored", reason: "contato_nao_resolvido" };
 
   const conversationId = await upsertConversation(admin, {
@@ -322,14 +354,17 @@ async function pedirPersistenciaDaMidia(
 async function conversaPelaThread(
   admin: SupabaseClient,
   organizationId: string,
+  channelSessionId: string,
   providerConversationId: string,
 ): Promise<{ id: string; contact_id: string } | null> {
-  const { data } = await admin
+  const { data, error } = await admin
     .from("conversations")
     .select("id, contact_id")
     .eq("organization_id", organizationId)
+    .eq("channel_session_id", channelSessionId)
     .eq("provider_conversation_id", providerConversationId)
     .maybeSingle();
+  if (error) throw new Error(`zernio_conversation_lookup_failed: ${error.message}`);
   const row = data as { id: string; contact_id: string | null } | null;
   return row?.contact_id ? { id: row.id, contact_id: row.contact_id } : null;
 }
@@ -363,9 +398,9 @@ async function upsertContact(
     p_chat_id: msg.conversationId,
     p_notify: msg.identity.displayName ?? msg.identity.username ?? null,
   });
-  if (error) return null;
+  if (error) throw new Error(`zernio_contact_upsert_failed: ${error.message}`);
   const contactId = (data as string) ?? null;
-  if (!contactId) return null;
+  if (!contactId) throw new Error("zernio_contact_upsert_failed: sem id");
 
   // O telefone entra MESMO quando a âncora é o id opaco.
   //
@@ -389,6 +424,56 @@ async function upsertContact(
   return contactId;
 }
 
+async function upsertSocialContact(
+  admin: SupabaseClient,
+  organizationId: string,
+  channelSessionId: string,
+  msg: ZernioInboundMessage,
+): Promise<string | null> {
+  const externalId = msg.identity.externalId;
+  if (!externalId) return null;
+  const identityQuery = () => admin.from("contact_channel_identities").select("contact_id").eq("organization_id", organizationId).eq("channel_session_id", channelSessionId).eq("provider", "zernio").eq("platform", msg.platform).eq("external_user_id", externalId);
+  const { data: known, error: identityLookupError } = await identityQuery().maybeSingle();
+  if (identityLookupError) throw new Error(`zernio_identity_lookup_failed: ${identityLookupError.message}`);
+  if (known?.contact_id) return known.contact_id as string;
+
+  const { data: created, error } = await admin.from("contacts").insert({
+    organization_id: organizationId,
+    full_name: msg.identity.displayName ?? msg.identity.username ?? `Contato ${msg.platform}`,
+    source: msg.platform,
+  }).select("id").single();
+  if (error || !created?.id) {
+    throw new Error(`zernio_contact_insert_failed: ${error?.message ?? "sem id"}`);
+  }
+  const { error: identityError } = await admin.from("contact_channel_identities").insert({
+    organization_id: organizationId,
+    contact_id: created.id,
+    channel_session_id: channelSessionId,
+    provider: "zernio",
+    platform: msg.platform,
+    external_user_id: externalId,
+    username: msg.identity.username,
+    display_name: msg.identity.displayName,
+  });
+  if (identityError?.code === "23505") {
+    const { data: raced } = await identityQuery().single();
+    // A outra requisição venceu a corrida. A identidade aponta para o contato
+    // vencedor; o contato que esta requisição acabou de criar não pode sobrar.
+    await admin
+      .from("contacts")
+      .delete()
+      .eq("organization_id", organizationId)
+      .eq("id", created.id);
+    if (!raced?.contact_id) throw new Error("zernio_identity_race_without_winner");
+    return raced.contact_id as string;
+  }
+  if (identityError) {
+    await admin.from("contacts").delete().eq("organization_id", organizationId).eq("id", created.id);
+    throw new Error(`zernio_identity_insert_failed: ${identityError.message}`);
+  }
+  return created.id as string;
+}
+
 async function upsertConversation(
   admin: SupabaseClient,
   input: {
@@ -403,7 +488,7 @@ async function upsertConversation(
     p_contact: input.contactId,
     p_session: input.channelSessionId,
   });
-  if (error || !data) return null;
+  if (error || !data) throw new Error(`zernio_conversation_upsert_failed: ${error?.message ?? "sem id"}`);
   const conversationId = data as string;
 
   // A thread do provider, que é o motivo deste módulo existir.
@@ -423,10 +508,12 @@ async function upsertConversation(
   // afirmava que o `update` foi CHAMADO com o payload certo, que era verdade, e
   // não que ele tivesse casado alguma linha. Escrever sempre é uma escrita a
   // mais por mensagem e zero condições sutis para errar.
-  await admin
+  const { error: threadError } = await admin
     .from("conversations")
     .update({ provider_conversation_id: input.providerConversationId })
+    .eq("organization_id", input.organizationId)
     .eq("id", conversationId);
+  if (threadError) throw new Error(`zernio_conversation_thread_failed: ${threadError.message}`);
 
   return conversationId;
 }
@@ -492,7 +579,10 @@ async function insertMessage(
       ...(temAnexo && primeiro?.url
         ? { media_url: primeiro.url, media_mime: mimeDoAnexo(primeiro.type) }
         : {}),
-      metadata: temAnexo ? { provider_attachments: msg.attachments } : {},
+      metadata: {
+        ...(temAnexo ? { provider_attachments: msg.attachments } : {}),
+        ...(msg.interaction ? { channel_interaction: msg.interaction } : {}),
+      },
       ...(msg.sentAt ? { sent_at: msg.sentAt } : {}),
     })
     .select("id")

@@ -18,6 +18,9 @@ import { metadataInicialDoCanal } from "@/lib/ai/elegibilidade/pre-go-live";
 import { ARCHIVED_AT, queryTolerantToMissingArchived } from "./archived";
 import { CHANNEL_PROVIDER_ZERNIO } from "./capabilities";
 import { zernioBaseUrl } from "./zernio/credentials";
+import { privateReplyToZernioComment, replyToZernioComment } from "./zernio/comments";
+import { isZernioPlatform, zernioCapabilitiesForAccount, type ZernioPlatform, type ZernioPlatformCapabilities } from "./zernio/platform-capabilities";
+import { replyToZernioReview } from "./zernio/reviews";
 import type { ChannelProvider } from "./types";
 
 /**
@@ -52,6 +55,8 @@ export type PartnerValidation =
       displayName: string | null;
       /** Qualidade do número segundo a plataforma (GREEN/YELLOW/RED). */
       qualityRating: string | null;
+      platform: ZernioPlatform;
+      capabilities: ZernioPlatformCapabilities;
     }
   | { ok: false; reason: string };
 
@@ -105,20 +110,49 @@ export async function validatePartnerCredentials(
     return { ok: false, reason: "Conta não encontrada para esta chave." };
   }
 
-  if (conta.platform !== "whatsapp") {
-    return {
-      ok: false,
-      reason: `Esta conta é de ${String(conta.platform ?? "outra rede")}, não de WhatsApp.`,
-    };
-  }
+  if (!isZernioPlatform(conta.platform)) return { ok: false, reason: "Plataforma da conta não suportada." };
 
   const meta = (conta.metadata ?? {}) as Record<string, unknown>;
+  const scopes = Array.isArray(conta.scopes) ? conta.scopes.filter((v): v is string => typeof v === "string") : Array.isArray(meta.scopes) ? meta.scopes.filter((v): v is string => typeof v === "string") : [];
+  const capabilities = conta.capabilities && typeof conta.capabilities === "object" ? conta.capabilities as Record<string, boolean> : undefined;
   return {
     ok: true,
     phoneNumber: typeof meta.displayPhoneNumber === "string" ? meta.displayPhoneNumber : null,
     displayName: typeof conta.displayName === "string" ? conta.displayName : null,
     qualityRating: typeof meta.qualityRating === "string" ? meta.qualityRating : null,
+    platform: conta.platform,
+    capabilities: zernioCapabilitiesForAccount(conta.platform, { scopes, capabilities }),
   };
+}
+
+export interface PartnerAccount {
+  accountId: string;
+  platform: ZernioPlatform;
+  displayName: string;
+  username: string | null;
+  capabilities: ZernioPlatformCapabilities;
+}
+
+export async function listPartnerAccounts(apiKey: string): Promise<{ ok: true; accounts: PartnerAccount[] } | { ok: false; reason: string }> {
+  let response: Response;
+  try {
+    response = await fetch(`${zernioBaseUrl()}/v1/accounts`, { headers: { Authorization: `Bearer ${apiKey.trim()}` } });
+  } catch { return { ok: false, reason: "Não foi possível falar com o provedor. Tente de novo." }; }
+  if (response.status === 401 || response.status === 403) return { ok: false, reason: "Chave recusada pelo provedor." };
+  if (!response.ok) return { ok: false, reason: `Provedor respondeu ${response.status}.` };
+  const body = await response.json().catch(() => null) as { accounts?: Record<string, unknown>[] } | null;
+  const accounts = (Array.isArray(body?.accounts) ? body.accounts : []).flatMap((account): PartnerAccount[] => {
+    const accountId = String(account._id ?? account.id ?? "");
+    if (!accountId || !isZernioPlatform(account.platform)) return [];
+    const metadata = account.metadata && typeof account.metadata === "object" ? account.metadata as Record<string, unknown> : {};
+    const scopes = Array.isArray(account.scopes) ? account.scopes.filter((v): v is string => typeof v === "string") :
+      Array.isArray(metadata.scopes) ? metadata.scopes.filter((v): v is string => typeof v === "string") : [];
+    const capabilities = account.capabilities && typeof account.capabilities === "object"
+      ? account.capabilities as Record<string, boolean>
+      : undefined;
+    return [{ accountId, platform: account.platform, displayName: String(account.displayName ?? account.username ?? accountId), username: typeof account.username === "string" ? account.username : null, capabilities: zernioCapabilitiesForAccount(account.platform, { scopes, capabilities }) }];
+  });
+  return { ok: true, accounts };
 }
 
 // ---------------------------------------------------------------------------
@@ -143,13 +177,18 @@ export interface PartnerSession {
   webhookPathToken: string | null;
   hasApiKey: boolean;
   archivedAt: string | null;
+  platform: ZernioPlatform;
+  capabilities: ZernioPlatformCapabilities;
 }
 
 const COLUNAS =
-  "id, zernio_account_id, phone_number, display_name, status, webhook_path_token, zernio_token_encrypted";
+  "id, zernio_account_id, zernio_platform, phone_number, display_name, status, webhook_path_token, zernio_token_encrypted, metadata";
 
 function toPartnerSession(row: Record<string, unknown> | null): PartnerSession | null {
   if (!row) return null;
+  const platform = isZernioPlatform(row.zernio_platform) ? row.zernio_platform : "whatsapp";
+  const metadata = row.metadata && typeof row.metadata === "object" ? row.metadata as Record<string, unknown> : {};
+  const savedCapabilities = metadata.zernio_capabilities && typeof metadata.zernio_capabilities === "object" ? metadata.zernio_capabilities as ZernioPlatformCapabilities : null;
   return {
     id: row.id as string,
     accountId: (row.zernio_account_id as string) ?? null,
@@ -159,6 +198,8 @@ function toPartnerSession(row: Record<string, unknown> | null): PartnerSession |
     webhookPathToken: (row.webhook_path_token as string) ?? null,
     hasApiKey: !!row.zernio_token_encrypted,
     archivedAt: (row.archived_at as string) ?? null,
+    platform,
+    capabilities: savedCapabilities ?? zernioCapabilitiesForAccount(platform, {}),
   };
 }
 
@@ -181,6 +222,43 @@ export async function findPartnerSession(
   return toPartnerSession(data as Record<string, unknown> | null);
 }
 
+export async function listPartnerSessions(admin: SupabaseClient, organizationId: string): Promise<PartnerSession[]> {
+  const { data } = await admin.from("channel_sessions").select(`${COLUNAS}, ${ARCHIVED_AT}`).eq("organization_id", organizationId).eq("provider", PARTNER_CHANNEL_PROVIDER).is(ARCHIVED_AT, null).order("created_at");
+  return (data ?? []).map((row) => toPartnerSession(row as Record<string, unknown>)).filter((row): row is PartnerSession => row !== null);
+}
+
+export async function sessaoParceiraParaAcaoSocial(
+  admin: SupabaseClient,
+  organizationId: string,
+  sessionId: string,
+): Promise<PartnerSession | null> {
+  const { data } = await admin
+    .from("channel_sessions")
+    .select(`${COLUNAS}, ${ARCHIVED_AT}`)
+    .eq("organization_id", organizationId)
+    .eq("id", sessionId)
+    .eq("provider", PARTNER_CHANNEL_PROVIDER)
+    .is(ARCHIVED_AT, null)
+    .maybeSingle();
+  return toPartnerSession(data as Record<string, unknown> | null);
+}
+
+export async function responderComentarioParceiro(
+  admin: SupabaseClient,
+  input: Parameters<typeof replyToZernioComment>[1] & { privateReply: boolean },
+): Promise<unknown> {
+  return input.privateReply
+    ? privateReplyToZernioComment(admin, input)
+    : replyToZernioComment(admin, input);
+}
+
+export async function responderAvaliacaoParceira(
+  admin: SupabaseClient,
+  input: Parameters<typeof replyToZernioReview>[1],
+): Promise<unknown> {
+  return replyToZernioReview(admin, input);
+}
+
 /**
  * Grava (ou ressuscita) a sessão.
  *
@@ -200,12 +278,20 @@ export async function savePartnerSession(
     webhookSecretEncrypted: string;
     phoneNumber: string | null;
     displayName: string;
+    platform: ZernioPlatform;
+    capabilities: ZernioPlatformCapabilities;
   },
-): Promise<{ error: string | null }> {
+): Promise<{ id: string | null; error: string | null }> {
+  let metadata = metadataInicialDoCanal();
+  if (input.existingId) {
+    const { data } = await admin.from("channel_sessions").select("metadata").eq("organization_id", input.organizationId).eq("id", input.existingId).maybeSingle();
+    if (data?.metadata && typeof data.metadata === "object") metadata = data.metadata as typeof metadata;
+  }
   const linha = {
     organization_id: input.organizationId,
     provider: PARTNER_CHANNEL_PROVIDER,
     zernio_account_id: input.accountId,
+    zernio_platform: input.platform,
     zernio_token_encrypted: input.apiKeyEncrypted,
     webhook_path_token: input.webhookPathToken,
     webhook_secret_encrypted: input.webhookSecretEncrypted,
@@ -213,13 +299,16 @@ export async function savePartnerSession(
     display_name: input.displayName,
     status: "WORKING",
     archived_at: null,
+    metadata: { ...metadata, zernio_capabilities: input.capabilities },
   };
 
-  const { error } = input.existingId
-    ? await admin.from("channel_sessions").update(linha).eq("id", input.existingId)
+  const { data, error } = input.existingId
+    ? await admin.from("channel_sessions").update(linha).eq("organization_id", input.organizationId).eq("id", input.existingId).select("id").single()
     : await admin
         .from("channel_sessions")
-        .insert({ ...linha, metadata: metadataInicialDoCanal() });
+        .insert(linha)
+        .select("id")
+        .single();
 
-  return { error: error?.message ?? null };
+  return { id: (data?.id as string | undefined) ?? null, error: error?.message ?? null };
 }

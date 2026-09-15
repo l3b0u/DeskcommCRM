@@ -456,6 +456,9 @@ export const AUDIT_ACTIONS = [
   "crm_task.created",
   "crm_task.updated",
   "crm_task.deleted",
+  "channel.comment_replied",
+  "channel.comment_private_replied",
+  "channel.review_replied",
   "organization.switched",
 ] as const;
 

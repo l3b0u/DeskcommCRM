@@ -10,6 +10,7 @@ import type { Message } from "@/lib/types/messaging";
 import { CitationButton } from "@/components/ai/CitationButton";
 import { MediaRenderer } from "@/components/inbox/media/MediaRenderer";
 import { ContactCard } from "@/components/inbox/media/ContactCard";
+import { SocialInteractionActions } from "@/components/inbox/SocialInteractionActions";
 import {
   extractCitations,
   isAiGeneratedMessage,
@@ -189,6 +190,8 @@ export function MessageBubble({ message, debugCitations, onResponder, citada }: 
             )}
           </>
         )}
+
+        <SocialInteractionActions message={message} />
 
         <div
           className={cn(

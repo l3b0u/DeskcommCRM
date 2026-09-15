@@ -632,7 +632,7 @@ export async function sendMessageHandler(
       .select(MSG_COLS)
       .maybeSingle();
     if (updated) message = updated as unknown as Message;
-  } else if (!chatId) {
+  } else if (!chatId && !(adapter.canAddressByThread && c.provider_conversation_id)) {
     const { data: updated } = await supabase
       .from("messages")
       .update({
@@ -709,7 +709,7 @@ export async function sendMessageHandler(
                 beforeSend: checkBoundary,
                 organizationId: ctx.organization_id,
                 sessionRef: resolveSessionRef(c.channel_sessions),
-                to: chatId,
+                to: chatId ?? "",
                 providerConversationId: c.provider_conversation_id,
                 name: input.template_name ?? "",
                 language: input.template_language ?? "",
@@ -719,7 +719,7 @@ export async function sendMessageHandler(
           : await sendTemplateForSession(supabase, {
               beforeSend: checkBoundary,
               organizationId: ctx.organization_id,
-              to: chatId,
+              to: chatId ?? "",
               name: input.template_name ?? "",
               language: input.template_language ?? "",
               values: input.template_values ?? {},
@@ -739,7 +739,7 @@ export async function sendMessageHandler(
           beforeSend: checkBoundary,
           organizationId: ctx.organization_id,
           sessionRef: resolveSessionRef(c.channel_sessions),
-          to: chatId,
+          to: chatId ?? "",
           providerConversationId: c.provider_conversation_id,
           kind: input.type,
           media: {
@@ -770,7 +770,7 @@ export async function sendMessageHandler(
           beforeSend: checkBoundary,
           organizationId: ctx.organization_id,
           sessionRef: resolveSessionRef(c.channel_sessions),
-          to: chatId,
+          to: chatId ?? "",
           providerConversationId: c.provider_conversation_id,
           kind: "contact",
           body: outboundBody ?? nome,
@@ -787,7 +787,7 @@ export async function sendMessageHandler(
           beforeSend: checkBoundary,
           organizationId: ctx.organization_id,
           sessionRef: resolveSessionRef(c.channel_sessions),
-          to: chatId,
+          to: chatId ?? "",
           providerConversationId: c.provider_conversation_id,
           kind: input.type,
           body: input.body ?? "",
@@ -803,7 +803,7 @@ export async function sendMessageHandler(
       }
       if (ctx.approvedReply) {
         message=await recordApprovedReplyReceiptSupabase(supabase,ctx.approvedReply,message.id,externalId,
-          externalId?(adapter.echoExternalIds?.({externalId,recipient:chatId})??[externalId]):[]) as unknown as Message;
+          externalId?(adapter.echoExternalIds?.({externalId,recipient:chatId ?? ""})??[externalId]):[]) as unknown as Message;
       } else {
       await removerEcoDoProprioEnvio(
         supabase,
@@ -812,7 +812,7 @@ export async function sendMessageHandler(
         message.id,
         externalId,
         externalId
-          ? (adapter.echoExternalIds?.({ externalId, recipient: chatId }) ?? [externalId])
+          ? (adapter.echoExternalIds?.({ externalId, recipient: chatId ?? "" }) ?? [externalId])
           : [],
       );
       const { data: updated } = await supabase

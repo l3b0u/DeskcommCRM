@@ -31,6 +31,8 @@ const texto = z.string().nullish();
 
 /** Quem está do outro lado. A ordem de precedência das âncoras vive em `webhook.ts`. */
 const zernioSenderSchema = z.looseObject({
+  id: texto,
+  username: texto,
   phoneNumber: texto,
   businessScopedUserId: texto,
   whatsappUsername: texto,
@@ -61,11 +63,12 @@ const zernioMessageSchema = z.looseObject({
 });
 
 export const zernioEnvelopeSchema = z.looseObject({
+  id: texto,
   event: texto,
   accountId: texto,
   /** Detalhe do aviso de número, quando a plataforma o manda solto. */
   reason: texto,
-  account: z.looseObject({ id: texto, accountId: texto }).nullish(),
+  account: z.looseObject({ id: texto, accountId: texto, platform: texto }).nullish(),
   conversation: z.looseObject({ participantId: texto, participantName: texto }).nullish(),
   template: z.looseObject({ name: texto, status: texto, reason: texto }).nullish(),
   number: z.looseObject({ reason: texto }).nullish(),

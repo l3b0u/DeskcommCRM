@@ -1,0 +1,14 @@
+{
+  "id": "evt_comment_1",
+  "event": "comment.received",
+  "timestamp": "2026-08-24T10:00:00Z",
+  "account": { "accountId": "acc_ig_1", "platform": "instagram" },
+  "comment": {
+    "id": "comment_77",
+    "platform": "instagram",
+    "platformPostId": "post_99",
+    "text": "Vocês entregam hoje?",
+    "createdAt": "2026-08-24T09:59:58Z",
+    "author": { "id": "ig_user_42", "username": "ana", "name": "Ana", "isOwnAccount": false }
+  }
+}

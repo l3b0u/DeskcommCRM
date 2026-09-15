@@ -8,6 +8,10 @@ Se você roda o DeskcommCRM numa VPS, **leia a seção da versão para a qual es
 
 ## [Não lançado]
 
+### Adicionado
+
+- **Atendimento social no mesmo cockpit** A conexão pelo provedor parceiro agora lista as contas disponíveis e permite conectar múltiplas redes. DMs de Instagram e Facebook, comentários e avaliações entram no atendimento com identidade social separada da identidade WhatsApp; respostas usam os endpoints oficiais da mesma conta.
+
 ## [1.17.0] — 2026-09-08
 
 ### Adicionado

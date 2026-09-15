@@ -145,25 +145,36 @@ beforeEach(() => {
 describe("identidade → wa_identity", () => {
   it("telefone vira phone:, o mesmo vocabulário do canal por QR", () => {
     expect(
-      waIdentityFrom({ phone: "+595991733685", bsuid: null, username: null, displayName: null, anchor: { kind: "phone", value: "+595991733685" } }),
+      waIdentityFrom({ phone: "+595991733685", bsuid: null, externalId: null, username: null, displayName: null, anchor: { kind: "phone", value: "+595991733685" } }),
     ).toBe("phone:+595991733685");
   });
 
   it("BSUID vira lid: — mesma NATUREZA de id, então é o MESMO contato nos dois canais", () => {
     // Inventar um terceiro prefixo criaria dois contatos para uma pessoa só.
     expect(
-      waIdentityFrom({ phone: null, bsuid: "BS_1", username: null, displayName: null, anchor: { kind: "bsuid", value: "BS_1" } }),
+      waIdentityFrom({ phone: null, bsuid: "BS_1", externalId: "BS_1", username: null, displayName: null, anchor: { kind: "bsuid", value: "BS_1" } }),
     ).toBe("lid:BS_1");
   });
 
   it("sem âncora devolve null", () => {
     expect(
-      waIdentityFrom({ phone: null, bsuid: null, username: "@x", displayName: null, anchor: null }),
+      waIdentityFrom({ phone: null, bsuid: null, externalId: null, username: "@x", displayName: null, anchor: null }),
     ).toBeNull();
   });
 });
 
 describe("o que a ingestão GRAVA", () => {
+  it("não aceita evento destinado a outra conta no token desta sessão", async () => {
+    const r = await ingestZernioInbound(admin, {
+      ...ENTRADA,
+      expectedAccountId: "acc-outra",
+      expectedPlatform: "whatsapp",
+      payload: evento(),
+    });
+    expect(r).toMatchObject({ status: "unknown_account" });
+    expect(ops).toEqual([]);
+  });
+
   it("grava a thread do provider — é o motivo deste módulo existir", async () => {
     const r = await ingestZernioInbound(admin, { ...ENTRADA, payload: evento() });
     expect(r.status).toBe("ingested");
@@ -244,9 +255,6 @@ describe("o que a ingestão RECUSA", () => {
     expect(r.reason).toBe(motivo);
     expect(ops.some((o) => o.tabela === "messages")).toBe(false);
   };
-
-  it("outra plataforma na mesma conta", () =>
-    recusa(evento({ platform: "instagram" }), "evento_sem_interesse"));
 
   it("sem identidade utilizável — criar contato anônimo faria a próxima mensagem virar um segundo contato", () =>
     recusa(evento({ sender: { whatsappUsername: "@x" } }), "sem_identidade_utilizavel"));

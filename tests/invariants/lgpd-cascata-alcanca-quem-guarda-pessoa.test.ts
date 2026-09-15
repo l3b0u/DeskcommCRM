@@ -115,20 +115,19 @@ function tabelasNaCascata(): string[] {
              pg_get_functiondef(p.oid),
              '(?:update|delete from)\\s+(?:public\\.)?"?([a-z_]+)"?', 'gi') m
      where p.proname = 'fn_lgpd_cascade_redact_contact'
-        or (
-          p.pronamespace = 'public'::regnamespace
-          and p.proname = 'fn_reply_redact'
-          and exists (
+        or exists (
             select 1 from pg_trigger t
              where t.tgfoid = p.oid
+               and p.proname in (
+                 'fn_reply_redact',
+                 'fn_redigir_identidades_de_canal_ao_anonimizar'
+               )
                and t.tgrelid = 'public.contacts'::regclass
-               and t.tgname = 'trg_reply_redact'
                and not t.tgisinternal
                and t.tgenabled in ('O', 'A')
                and t.tgtype = 17 -- AFTER UPDATE FOR EACH ROW
                and (select attnum from pg_attribute
                      where attrelid = t.tgrelid and attname = 'is_anonymized') = any(t.tgattr)
-          )
         )
      order by 1;
   `)

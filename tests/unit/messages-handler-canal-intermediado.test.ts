@@ -134,6 +134,7 @@ function projetar(linha: Row, select: string): Row {
 interface Forma {
   providerConversationId?: string | null;
   provider?: string;
+  semIdentidade?: boolean;
 }
 
 function conversaCompleta(forma: Forma = {}): Row {
@@ -146,7 +147,9 @@ function conversaCompleta(forma: Forma = {}): Row {
     is_group: false,
     group_chat_id: null,
     provider_conversation_id: forma.providerConversationId ?? null,
-    contacts: { phone_number: "+595991733685", wa_identity: null, wa_lid: "999888", is_blocked: false },
+    contacts: forma.semIdentidade
+      ? { phone_number: null, wa_identity: null, wa_lid: null, is_blocked: false }
+      : { phone_number: "+595991733685", wa_identity: null, wa_lid: "999888", is_blocked: false },
     channel_sessions: {
       provider,
       waha_session_name: provider === "waha" ? "default" : null,
@@ -375,6 +378,17 @@ describe("a thread do provider atravessa os três elos até o transporte", () =>
     ) as Record<string, unknown>;
     expect(corpo.attachmentUrl).toBe("https://signed.example/a.jpg");
     expect(corpo.attachmentType).toBe("image");
+  });
+
+  it("DM social sem telefone nem wa_identity sai pela thread recebida", async () => {
+    vi.stubEnv("ZERNIO_ACCOUNT_ID", CONTA);
+    vi.stubEnv("ZERNIO_API_KEY", "sk_env");
+    const fetchMock = respostaOk("social.OUT");
+    vi.stubGlobal("fetch", fetchMock);
+    const { supabase } = makeSupabase(conversaCompleta({ providerConversationId: THREAD, semIdentidade: true }));
+    const msg = await sendMessageHandler(supabase, ctx, texto());
+    expect(msg.status).toBe("sent");
+    expect(String(fetchMock.mock.calls[0]?.[0])).toContain(THREAD);
   });
 
   it("sem thread: failed com o motivo nomeado — nunca `sending` nem `queued`", async () => {
